@@ -3,8 +3,7 @@ BOT_SOURCES  = bot.cpp
 
 DEFINES        =
 CFLAGS         = -g
-LIBRARIES      = -lpcap
-
+LIBRARIES      = -lpcap -lssl -lcrypto
 CC              = g++
 BOT_OBJECTS  = $(BOT_SOURCES:.cpp=.o)
 INCLUDES        = #-I.
