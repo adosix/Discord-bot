@@ -28,6 +28,7 @@ std::regex r_id("\"id\": \"(.*?)\"");
 std::regex r_name("\"name\": \"(.*?)\"");
 std::regex r_last_msg("\"last_message_id\": \"(.*?)\""); 
 std::regex r_content("\"content\": \"(.*?)\""); 
+std::regex r_username("\"username\": \"(.*?)\""); 
 
 SSL *ssl;
 int sock;
@@ -120,10 +121,15 @@ int RecvPacket()
 {
     int len=100;
     char buf[1000000];
-   while (len > 20){
+   while (len>0){
         len=SSL_read(ssl, buf, 100);
         buf[len]=0;
         resp.append(buf);
+        if (buf[0]=='0' && buf[1]=='\r' && buf[2]=='\n')
+        {
+            break;
+        }
+        
     } 
     //printf("%s \n", resp.c_str());
 
@@ -204,12 +210,13 @@ void get_newer_msgs(std::string token, std::string last_msg,std::string channel)
 }
 
 void check_new_messages(std::string token,std::string last_msgs[], int cnt, std::list <std::string> chosen_channels){
-    std::smatch match;
+    
     for(const auto& channel : chosen_channels)
         {
+            std::smatch match;
             char content[1024];
             resp= "";
-            std::cout << channel.c_str() << std::endl;
+            std::cout << "\nchannel: "<< channel.c_str() << std::endl;
             sprintf(content,
             "GET /api/channels/%s HTTP/1.1\r\n"
             "Host: discord.com\r\n"
@@ -217,29 +224,34 @@ void check_new_messages(std::string token,std::string last_msgs[], int cnt, std:
             ,
             channel.c_str(),
             token.c_str());
-            //printf("%s",content);
 
             SendPacket(content);
             RecvPacket();
 
-            std::regex_search(resp, match, r_last_msg) ;
-            if((last_msgs[cnt].compare(match.str(1))) != 0 ){
-                resp= "";
+            
+            
+            std::regex_search(resp, match, r_last_msg);
+            printf(" match last message :%s", match.str(1).c_str());
+            printf("\n stored last message:%s\n\n", last_msgs[cnt].c_str());
+            
+            if((last_msgs[cnt].compare(match.str(1))) != 0 ){             
+                std::string tempo = match.str(1);
                 get_newer_msgs(token, last_msgs[cnt], channel);
-                std::string temp = resp;
-                std::string id_value;
-                while(std::regex_search(temp, match, r_id)) {
-                    id_value = match.str(1); 
-                    temp = match.suffix().str(); 
-                    std::regex_search(temp, match, r_content) ;
+                printf("%s\n", resp.c_str());
 
-                    std::string msg = "{\"content\": \""+match.str(1) +"\"}";
-                    printf("\r contentus: %s", msg.c_str());
+                last_msgs[cnt]= tempo;
+                
+                std::string temp_resp = resp;
+                while(std::regex_search(temp_resp, match, r_content)) {
+                    std::string msg = match.str(1);
+                    std::regex_search(temp_resp, match, r_username);
+                    
+                    if ((match.str(1).compare("isa-bot")) != 0){
+                    msg = "{\"content\": \""+match.str(1)+": "+ msg +"\"}";
                     sprintf(content,
                     "POST /api/channels/%s/messages HTTP/1.1\r\n"
                     "Host: discord.com\r\n"
                     "Content-Type: application/json\r\n"
-                    "Connection: keep-alive\r\n"
                     "Content-Length: %ld\r\n"
                     "Authorization: Bot %s\r\n\r\n"
                     "%s"
@@ -249,11 +261,14 @@ void check_new_messages(std::string token,std::string last_msgs[], int cnt, std:
                     token.c_str(),
                     msg.c_str()
                     );
-                    SendPacket(content);
-                    temp = "";
-                    
+                    SendPacket(content);  
+                    RecvPacket();    
+                    printf("\nodpoved na post:%s\n", resp.c_str());
+                    resp = "";
+                    }
+                    temp_resp = match.suffix().str();  
                 }
-                last_msgs[cnt]= id_value;
+              resp= "";    
             }
             resp= "";
             cnt++;
@@ -389,7 +404,6 @@ int main(int argc, char *argv[])
             resp= "";
             cnt++;
         }
- 
     int i;
     //infinite loop with cooldown 2 secs
     for(;;)
