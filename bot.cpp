@@ -329,9 +329,9 @@ int main(int argc, char *argv[]){
     char *ip=(char*)malloc(sizeof(char) *100);
     struct in_addr **addr_list;
     Arguments *arguments = Arguments::parse_arguments(argc, argv);
-
     int s;
     s = socket(AF_INET, SOCK_STREAM, 0);
+    
     if (s < 0) {
         printf("Error creating socket.\n");
         return -1;
@@ -349,8 +349,7 @@ int main(int argc, char *argv[]){
     
     addr_list = (struct in_addr **) hos->h_addr_list;
 
-    for(int i = 0; addr_list[i] != NULL; i++) 
-    {
+    for(int i = 0; addr_list[i] != NULL; i++) {
         //Return the first one;
         strcpy(ip , inet_ntoa(*addr_list[i]) );
         break;
