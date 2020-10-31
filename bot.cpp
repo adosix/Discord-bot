@@ -17,11 +17,18 @@
 #include <regex>
 #include <list> 
 #include <iterator> 
-
+       /* if (std::regex_search(resp, match, r_retry))
+        {
+             
+            printf("\n\n!!!!match was found here: %s \n\n", match.str(1).c_str());
+            sleep_sec(std::stoi(match.str(1))/1000000);
+        }*/
 
 #define REQUIRED_ARGUMENT 1
 #define NO_ARGUMENT 0
 const int NUM_SECONDS = 2;
+
+std::regex r_retry("retry-after: (.*?)\r\n");
 
 
 std::regex r_id("\"id\": \"(.*?)\""); 
@@ -114,26 +121,38 @@ Arguments* Arguments::parse_arguments(int argc, char **argv)
     
     return arguments;
 }
+
+void sleep_sec(int i){
+     for(i = 0 ; i < NUM_SECONDS ; i++) { usleep(1000 * 1000); }
+}
+
 /**
      * Function recieve packet and stores it in global variable resp
      */
 int RecvPacket()
 {
-    int len=100;
+    int len=10000;
+    std::regex end_of_body{"0\r\n"};
+    std::regex chunk{"Transfer-Encoding: chunked"};
+    bool chunked = false;
     char buf[1000000];
-   while (len>0){
-        len=SSL_read(ssl, buf, 100);
-        buf[len]=0;
+    while(len>0) {
+        len=SSL_read(ssl, buf, 10000);
+        buf[len] = 0;
         resp.append(buf);
-        if (buf[0]=='0' && buf[1]=='\r' && buf[2]=='\n')
-        {
-            break;
-        }
         
-    } 
-    //printf("%s \n", resp.c_str());
-
-
+        if(!chunked) {
+            if(std::regex_search(resp, chunk)){
+                chunked = true;
+            } 
+            else { //is not chunked
+            if(SSL_pending(ssl) == 0) break;
+            }  
+        }
+        else { //we know it's chunked and end wont be in first chunk
+            if(std::regex_search(buf, end_of_body)) break; //has end
+        }
+    }
     if (len <= 0) {
         int err = SSL_get_error(ssl, len);
         if (err == SSL_ERROR_WANT_READ)
@@ -144,6 +163,7 @@ int RecvPacket()
             return -1;
     }
     return 0;
+
 }
 
 int SendPacket(const char *buf)
@@ -173,7 +193,7 @@ void log_ssl()
         char *str = ERR_error_string(err, 0);
         if (!str)
             return;
-        printf("%s",str);
+        printf("%s------",str);
         printf("\n");
         fflush(stdout);
     }
@@ -190,13 +210,16 @@ void get_guilds(std::string token){
     token.c_str());
     //printf("%s",content);
     SendPacket(content);
-    RecvPacket();
-}
+    if(RecvPacket() == -1){
+        resp="";
+        SendPacket(content);
+        RecvPacket();
+    }
+    }
 
 void get_newer_msgs(std::string token, std::string last_msg,std::string channel){
     char content[1024];
     resp= "";
-    std::cout << channel.c_str() << std::endl;
     sprintf(content,
     "GET /api/channels/%s/messages?after=%s HTTP/1.1\r\n"
     "Host: discord.com\r\n"
@@ -205,14 +228,21 @@ void get_newer_msgs(std::string token, std::string last_msg,std::string channel)
     channel.c_str(),
     last_msg.c_str(),
     token.c_str()); 
+    printf("\nmoj get na msg after: \n%s\n", content);
     SendPacket(content);
-    RecvPacket();
+    if(RecvPacket() == -1){
+        resp="";
+        SendPacket(content);
+        RecvPacket();
+    }
+    printf("\nodpoved na GET msgs after:\n%s\n", resp.c_str());
 }
 
-void check_new_messages(std::string token,std::string last_msgs[], int cnt, std::list <std::string> chosen_channels){
-    
+
+void respond_to_new_msgs(std::string token,std::string last_msgs[], int cnt, std::list <std::string> chosen_channels){
     for(const auto& channel : chosen_channels)
         {
+
             std::smatch match;
             char content[1024];
             resp= "";
@@ -226,58 +256,76 @@ void check_new_messages(std::string token,std::string last_msgs[], int cnt, std:
             token.c_str());
 
             SendPacket(content);
-            RecvPacket();
+            if(RecvPacket() == -1){
+                resp="";
+                SendPacket(content);
+                RecvPacket();
+            }
 
-            
+            printf("\nodpoved na GET channels:\n%s\n", resp.c_str());
             
             std::regex_search(resp, match, r_last_msg);
-            printf(" match last message :%s", match.str(1).c_str());
-            printf("\n stored last message:%s\n\n", last_msgs[cnt].c_str());
-            
+            printf("match last message :%s\n", match.str(1).c_str());
+            printf("stored last message:%s\n\n", last_msgs[cnt].c_str());
+            std::string temp_last = match.str(1);
             if((last_msgs[cnt].compare(match.str(1))) != 0 ){             
-                std::string tempo = match.str(1);
-                get_newer_msgs(token, last_msgs[cnt], channel);
-                printf("%s\n", resp.c_str());
-
-                last_msgs[cnt]= tempo;
+                printf("new msg pred funkciou: %s", temp_last.c_str());
+                get_newer_msgs(token,last_msgs[cnt], channel);
+                std::list <std::string> authors_messages; //stores [msg,author,msg,author..]
+                last_msgs[cnt] = temp_last;
                 
                 std::string temp_resp = resp;
                 while(std::regex_search(temp_resp, match, r_content)) {
-                    std::string msg = match.str(1);
+                    authors_messages.push_back(match.str(1)); //content
                     std::regex_search(temp_resp, match, r_username);
-                    
-                    if ((match.str(1).compare("isa-bot")) != 0){
-                    msg = "{\"content\": \""+match.str(1)+": "+ msg +"\"}";
-                    sprintf(content,
-                    "POST /api/channels/%s/messages HTTP/1.1\r\n"
-                    "Host: discord.com\r\n"
-                    "Content-Type: application/json\r\n"
-                    "Content-Length: %ld\r\n"
-                    "Authorization: Bot %s\r\n\r\n"
-                    "%s"
-                    ,
-                    channel.c_str(),
-                    strlen(msg.c_str()),
-                    token.c_str(),
-                    msg.c_str()
-                    );
-                    SendPacket(content);  
-                    RecvPacket();    
-                    printf("\nodpoved na post:%s\n", resp.c_str());
-                    resp = "";
-                    }
-                    temp_resp = match.suffix().str();  
+                    temp_resp = match.suffix().str();    
+                    authors_messages.push_back(match.str(1)); //author
                 }
-              resp= "";    
+                while(true){
+                    if(authors_messages.empty()){
+                        break;
+                    }
+                    std::string author = authors_messages.back();
+                    authors_messages.pop_back();
+                    std::string msg =  authors_messages.back();
+                    authors_messages.pop_back();
+                    if ((author.compare("isa-bot")) != 0){
+
+                        std::string author_msg = "{\"content\": \""+ author+": "+ msg+"\"}";
+                        sprintf(content,
+                        "POST /api/channels/%s/messages HTTP/1.1\r\n"
+                        "Host: discord.com\r\n"
+                        "Content-Type: application/json\r\n"
+                        "Content-Length: %ld\r\n"
+                        "Authorization: Bot %s\r\n\r\n"
+                        "%s"
+                        ,
+                        channel.c_str(),
+                        strlen(author_msg.c_str()),
+                        token.c_str(),
+                        author_msg.c_str()
+                        );
+
+                        SendPacket(content);  
+                        if(RecvPacket() == -1){
+                            resp="";
+                            SendPacket(content);
+                            RecvPacket();
+                        }  
+
+                        printf("\nMOJ POST KTORY SA ODOSLAL: \n%s\n", content);                    
+                        printf("\nodpoved na POST:\n%s\n", resp.c_str());
+                        resp = "";
+                    }
+                
+                }
+                resp= ""; 
             }
             resp= "";
             cnt++;
         }
 }
-int main(int argc, char *argv[])
-{
-
-
+int main(int argc, char *argv[]){   
     char *ip=(char*)malloc(sizeof(char) *100);
     struct in_addr **addr_list;
     Arguments *arguments = Arguments::parse_arguments(argc, argv);
@@ -289,15 +337,16 @@ int main(int argc, char *argv[])
         return -1;
     }
     struct sockaddr_in sa;
-    memset (&sa, 0, sizeof(sa));
+    memset(&sa, 0, sizeof(sa));
     struct hostent *hos;
-    hos=gethostbyname("www.discord.com");
+    hos = gethostbyname("www.discord.com");
     if(!hos){   
-        printf("chyba pri gethostbyname\n");
+        printf("Error while gethostbyname\n");
         close(s);
         exit(10);
         
     }
+    
     addr_list = (struct in_addr **) hos->h_addr_list;
 
     for(int i = 0; addr_list[i] != NULL; i++) 
@@ -306,8 +355,6 @@ int main(int argc, char *argv[])
         strcpy(ip , inet_ntoa(*addr_list[i]) );
         break;
     }
-
-
    
     sa.sin_family      = AF_INET;
     sa.sin_addr.s_addr = inet_addr(ip);
@@ -339,6 +386,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    
     //get guilds of the bot
     get_guilds(arguments->token);
 
@@ -368,9 +416,12 @@ int main(int argc, char *argv[])
         ,
         guild_ids[i].c_str(),
         arguments->token.c_str());
-
         SendPacket(content);
-        RecvPacket();
+        if(RecvPacket() == -1){
+            resp="";
+            SendPacket(content);
+            RecvPacket();
+        }
         std::string temp = resp;
         while(std::regex_search(temp, match, r_id)) {
         std::string id_value = match.str(1); 
@@ -398,20 +449,26 @@ int main(int argc, char *argv[])
             arguments->token.c_str());
 
             SendPacket(content);
-            RecvPacket();
+            if(RecvPacket() == -1){
+                resp="";
+                SendPacket(content);
+                RecvPacket();
+            }
             std::regex_search(resp, match, r_last_msg) ;
             last_msgs[cnt] = match.str(1);
             resp= "";
             cnt++;
         }
+        printf("NO POOOOD");
     int i;
     //infinite loop with cooldown 2 secs
     for(;;)
     {
+        
         // delay for "NUM_SECONDS" seconds
-        for(i = 0 ; i < NUM_SECONDS ; i++) { usleep(1000 * 1000); }
+       sleep_sec(2);
         int cnt =0;
-        check_new_messages(arguments->token, last_msgs, cnt, chosen_channels);
+        respond_to_new_msgs(arguments->token, last_msgs, cnt, chosen_channels);
     }
     return 0;
 }
