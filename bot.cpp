@@ -27,13 +27,16 @@ static const bool DEBUG = true;    //if true then debug prints will be printed
 static const std::regex r_unicode4("\\\\u(\\a|b|c|d|e|f){4}");
 static const std::regex r_unicode8("\\\\U(\\a|b|c|d|e|f){8}");
 static const std::regex r_retry("retry-after: (.*?)\r\n");
+static const std::regex r_bot("(.*?)bot(.*?)");
 static const std::regex r_id("\"id\": \"(.*?)\""); 
 static const std::regex r_name("\"name\": \"(.*?)\"");
 static const std::regex r_last_msg("\"last_message_id\": \"(.*?)\""); 
 static const std::regex r_content("\"content\": \"(((.*?)|(?=\\\\\"))*?)\", "); 
 static const std::regex r_username("\"username\": \"(.*?)\""); 
-static const std::regex end_of_body{"0\r\n"};
-static const std::regex chunk{"Transfer-Encoding: chunked"};
+static const std::regex r_end_of_body{"0\r\n"};
+static const std::regex r_chunk{"Transfer-Encoding: chunked"};
+static const std::regex r_unauthorized("(.*?)401 Unauthorized\r\n");
+
 
 SSL *ssl;
 int sock;
@@ -41,7 +44,7 @@ std::string resp("");
 
 void exit_program(int ret_val, std::string msg)
 {
-    std::cerr << msg;
+    std::cerr << msg << "\n";
     exit(ret_val);
 }
 
@@ -146,7 +149,7 @@ int RecvPacket()
             return -1;
         }
         if(!chunked) {
-            if(std::regex_search(resp, chunk)){
+            if(std::regex_search(resp, r_chunk)){
                 chunked = true;
             } 
             //response is not chunked
@@ -156,7 +159,7 @@ int RecvPacket()
         }
         //we know response is chunked and end wont be in first chunk
         else { 
-            if(std::regex_search(buf, end_of_body)) break; //has end
+            if(std::regex_search(buf, r_end_of_body)) break; //has end
         }
     }
     if (len <= 0) {
@@ -219,6 +222,14 @@ void get_guilds(std::string token){
         resp="";
         SendPacket(content);
     }
+    if (DEBUG == true)
+    {   std::smatch match;
+        printf("\nGET GUILDS\n%s", resp.c_str());
+        if(std::regex_search(resp, match, r_unauthorized)){
+            exit_program(1, "Unathorized token");
+        }
+    }
+    
 }
 
 void get_msgs_after(std::string token, std::string last_msg,std::string channel){
@@ -288,8 +299,7 @@ void post_msgs(std::string channel,std::string token,std::string author,std::str
     temp = std::regex_replace(temp, r_unicode8, "x");
 
     if ((author + ": " + temp).length()>2000){
-        if (DEBUG == true)
-        {
+        if (DEBUG == true){
             printf("big message");
         }
         
@@ -317,7 +327,11 @@ void post_msgs(std::string channel,std::string token,std::string author,std::str
         resp="";
         post_msg(channel,token,msg_body);
     }
-    printf("\n\nend postu\n\n");
+    if (DEBUG==true)
+    {
+        printf("\nodpoved na POST:\n%s\n", resp.c_str());
+    } 
+    resp="";
 }
 
 
@@ -331,8 +345,7 @@ void post_msgs(std::string channel,std::string token,std::string author,std::str
 */  
 void respond_to_new_msgs(std::string token,std::string last_msgs[], std::list <std::string> chosen_channels, bool verbose){
     int cnt =0;
-    for(const auto& channel : chosen_channels)
-        {
+    for(const auto& channel : chosen_channels){
             std::smatch match;
             char content[1024];
             if(DEBUG == true){
@@ -341,31 +354,35 @@ void respond_to_new_msgs(std::string token,std::string last_msgs[], std::list <s
             resp= "";
             get_channel(channel,token);
             while(RecvPacket() == -1){
-                printf("\n\n\n\n SOM TU \n\n\n\n");
+                if(DEBUG == -1){
+                    printf("\n\n\n\n CAKAM \n\n\n\n");
+                }
                 resp="";
                 get_channel(channel,token);
             }
             std::regex_search(resp, match, r_last_msg);
-
-            if (DEBUG == true)
-            {
+            if (DEBUG == true){
                 printf("\nodpoved na GET channels:\n%s\n", resp.c_str());
                 printf("match last message :%s\n", match.str(1).c_str());
                 printf("stored last message:%s\n\n", last_msgs[cnt].c_str());
             }
-            std::string temp_last = match.str(1);
+            
+            //std::string temp_last = match.str(1);
             if((last_msgs[cnt].compare(match.str(1))) != 0 ){             
-                if (DEBUG == true)
-                {
-                    printf("\nnew msg pred funkciou:\n%s\n", temp_last.c_str());
-                }
+                //if (DEBUG == true){
+                //    printf("\nnew msg pred funkciou:\n%s\n", temp_last.c_str());
+                //}
                 get_msgs_after(token,last_msgs[cnt], channel);
                 std::list <std::string> authors_messages; //stores [msg,author,msg,author..]
-                last_msgs[cnt] = temp_last;
+                //last_msgs[cnt] = temp_last;
                 
                 std::string temp_resp = resp;
                 while(std::regex_search(temp_resp, match, r_content)) {
                     authors_messages.push_back(match.str(1)); //content
+                    //saving msg id of last msg found
+                    std::regex_search(resp, match, r_id);
+                    last_msgs[cnt] = match.str(1);
+
                     std::regex_search(temp_resp, match, r_username);
                     temp_resp = match.suffix().str();    
                     authors_messages.push_back(match.str(1)); //author
@@ -378,11 +395,9 @@ void respond_to_new_msgs(std::string token,std::string last_msgs[], std::list <s
                     authors_messages.pop_back();
                     std::string msg =  authors_messages.back();
                     authors_messages.pop_back();
-                    if ((author.compare("isa-bot")) != 0){
-                        if (verbose == true)
-                        {
+                    if (!(std::regex_search(author, match, r_bot))){
+                        if (verbose == true){
                             printf("%s - %s: %s\n", channel.c_str(), author.c_str(), msg.c_str());
-                            printf("asd");
                         }
                         
                         post_msgs(channel,token, author, msg);
@@ -395,6 +410,7 @@ void respond_to_new_msgs(std::string token,std::string last_msgs[], std::list <s
             cnt++;
         }
 }
+
 
 int main(int argc, char *argv[]){   
     char *ip=(char*)malloc(sizeof(char) *100);
@@ -415,7 +431,6 @@ int main(int argc, char *argv[]){
         printf("Error while gethostbyname\n");
         close(s);
         exit(10);
-        
     }
     
     addr_list = (struct in_addr **) hos->h_addr_list;
@@ -456,7 +471,6 @@ int main(int argc, char *argv[]){
         return -1;
     }
 
-    
     //get guilds of the bot
     get_guilds(arguments->token);
 
@@ -491,6 +505,11 @@ int main(int argc, char *argv[]){
             resp="";
             SendPacket(content);
         }
+        if (DEBUG == true)
+        {
+          printf("GET CHANNELS TO SELECT \"isa-bot\"\n%s\n", resp.c_str());
+        }
+        
         std::string temp = resp;
         while(std::regex_search(temp, match, r_id)) {
         std::string id_value = match.str(1); 
@@ -505,17 +524,18 @@ int main(int argc, char *argv[]){
 
     std::string last_msgs[chosen_channels.size()];
     int cnt =0;
-    for(const auto& channel : chosen_channels)
-        {
+    for(const auto& channel : chosen_channels){
             resp= "";
-            if (DEBUG == true)
-            {
+            if (DEBUG == true){
                 printf("channel: %s\n",channel.c_str());
             }
             get_channel(channel,arguments->token);
             while(RecvPacket() == -1){
                 resp="";
                 get_channel(channel,arguments->token);
+            }
+            if (DEBUG == true){
+                printf("GET CHANNEL FOR LAST MSG\n%s\n",resp.c_str());
             }
             std::regex_search(resp, match, r_last_msg) ;
             last_msgs[cnt] = match.str(1);
@@ -524,8 +544,7 @@ int main(int argc, char *argv[]){
         }
     int i;
     //infinite loop with cooldown 2 secs
-    for(;;)
-    {
+    for(;;){
         // delay for "NUM_SECONDS" seconds
         sleep_sec(2);
         respond_to_new_msgs(arguments->token, last_msgs, chosen_channels,arguments->verbose);
