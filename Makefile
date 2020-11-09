@@ -1,5 +1,5 @@
-BOT          = bot
-BOT_SOURCES  = bot.cpp
+BOT          = isabot
+BOT_SOURCES  = isabot.cpp
 
 DEFINES        =
 CFLAGS         = -g

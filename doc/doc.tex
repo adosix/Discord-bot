@@ -1,0 +1,192 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[left=2cm,text={17cm,24cm},top=3cm]{geometry}
+\usepackage[slovak]{babel}
+\usepackage[]{opensans}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\graphicspath{{.}}
+\usepackage{times}
+\usepackage{cite}
+\usepackage{url}
+\usepackage{enumitem}
+\usepackage{indentfirst}
+\usepackage{color}
+\usepackage[unicode,colorlinks,hyperindex,plainpages=false,urlcolor=black,linkcolor=black,citecolor=black]{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\lstset{basicstyle=\ttfamily,
+  showstringspaces=false
+}
+
+\providecommand{\uv}[1]{\quotedblbase #1\textquotedblleft}
+
+\clubpenalty=10000
+\widowpenalty=10000
+
+\begin{document} %#################################################################################
+
+%TITLE PAGE
+\begin{titlepage}
+
+\begin{center}
+
+
+	\vspace{\stretch{0.682}}
+
+	{
+	
+		\Huge Discord bot\\
+		\LARGE implementovaný v jazyku C++\\[0.4em]
+	}
+
+	\vspace{\stretch{0.318}}
+
+\end{center}
+
+	{
+		\LARGE \today \hfill Andrej Ježík
+	}
+
+\end{titlepage}	
+
+%CONTENT
+\setlength{\parskip}{0pt}
+{\hypersetup{hidelinks}\tableofcontents}
+\setlength{\parskip}{0pt}
+
+\newpage %#########################################################################################
+
+\section{Úvod}
+	\indent Cieľom projektu  bolo vytvoriť program v jazyku C++, ktorý je schopný komunikovať cez ssl 
+	pripojenie s api Discordu. Bot má za úlohu pomocou aktivovaného tokenu sa pripojiť na server a kanál 
+	isa-bot kde má sledovať správy užívateľov a preposielať ich späť na server ako echo.
+
+\section{Pojmy}
+
+	\subsection{SSL}
+		\indent SSL alebo Secure Sockets Layer je protokol, ktorý slúži na založenie 
+		overeného a zašifrovaného spojenia medzi zariadeniami na sieti. SSL funguje pomocou 
+		priradzovania entít ako sú webstránky a spoločnosti ku kryptografickým párom kľúčov 
+		pomocou digitálneho dokumentu známeho ako SSL certifikát. Každý pár kľúčov pozostáva z 
+		privátneho a verejného kľúča. Privátny kľúč sa nikdy neposiela a verejný kľúč môže byť 
+		voľne distribuovaný pomocou certifikátu. 
+		\indent Pomocou matematického vzťahu medzi kľúčmi je možné pomocou verejného kľúča zašifrovať 
+		správy, ktoré môžu byť následne rozšifrované iba pomocu privátneho kľúča. Vlastík privátneho kľúča 
+		taktiež môže s jeho pomocou podpísovať dokumenty. Podpis môže byť skontrolovaný hociktorým zariadením, 
+		ktoré má daný verejný kľúč.
+
+	\subsection{HTTP}
+		\indent HTTP alebo Hypertext Transfer Protocol je 
+		protol aplikačnej vrstvy pre prenos hypermédiálnych 
+		dokumentov, ako sú HTML. Bol navrhnutý na komunikáciu medzi webovým prehliadačom a webovým 
+		serverom, ale taktiež môže byť použitý na iné účely. HTTP nasleduje klasický client-server model, 
+		podľa ktorého klient otvára spojenie aby odoslal požiadavku na server a čaká na odpoveď servera. 
+		HTTP je bezstavový protokol, čo znamená, že server si neuchováva žiadne dáta medzi dvomi požiadavkami.
+
+	\subsection{HTTPS}
+		\indent HTTPS alebo HTTP cez SSL je použitie SSL (Secure Socket Layer) alebo TLS (Transport Layer Security) 
+		ako podvrstvy pod klasickou HTTP aplikačnou vrstvou. HTTPS zašifruje a rozšifruje uživateľské požiadavky, tak 
+		ako aj stránky, ktoré sú odpoveďou web serveru.
+
+
+\section{Návrh a implementácia}
+
+	\indent K implementácii bol zvolený viacparadigmový programovací jazyk C++. V sekcii implementačné detaily 
+	budú popísané podrobnejšie logické celky implementácie projektu. Na vytvorenie SSL spojenia boli využité 
+	knižnice openSSL. V projekte sa nevyskytujú relatívne nízko-úrovňové konštrukcie keďže knižnica OpenSSL 
+	zaobaľuje infraštruktúru soketov a špecifikáciu adries vo vysoko-úrovňových bezpečnostných konštrukciach.
+
+	\subsection{Implementačné detaily}
+
+		\begin{itemize}
+
+			\item \textit{Argumenty}\\[0.4em]
+			     Na získanie argumentov používame knižnicu getopt.
+				 Trieda Arguments sa stará o získanie a spracovanie vstupných argumentov programu. Argumenty budú dostupné v objekte arguments.\\ Podrobnejšie argumenty rozoberieme v nasledujúcej sekcii.
+ 
+			\item \textit{SSL spojenie}\\[0.4em]
+				Vytvoríme si socket pomocou funkcie socket, vytvoríme si SSL štruktúru pomocou funkcie SSL\_new nastavíme deskriptor súborov fd ako vstupno/výstupné zariadenie pre SSL. Ako ďaľší krok inicializujeme SSL komunikáciu so serverom s funkciou SSL\_connect.\\
+				Pre posielanie paketov nám slúži funkcia send\_packet, ktorá využíva na zaslanie funkciu z SSL\_write, pri chybe ukončí program s návratovou hodnotou -1.\\
+				Funcia recv\_packet slúži následne pre prímanie odpovede od servera. Využívame funkciu SSL\_read(), pri príjmaní zistíme či je odpoveď chunked alebo nie a podľa toho vieme kedy ukončiť čítanie.
+				
+
+			\item \textit{HTTP požiadavky}\\[0.4em]
+				Každý typ požiadavky má svoju funkciu:\\
+				get\_guilds zostaví požiadavku na ktorú sa nám vráti odpoveď s ID servermi na ktoré má bot prístup.\\
+				get\_channel zostavi požiadavku naktorú sa nám vráti odpoveď s informáciami o danom kanále a tak ďalej
+			
+			
+			\item \textit{Získanie a spracovanie správ}\\[0.4em]
+			    Pri štarte programu si uložíme identifikátor poslednej z každého kanálu, ktorý spracuvávame. Následne periodicky sledujeme kanály a porovnávame identifikátor poslednej správy z uloženým identifikátorom, ak sa líšia tak pošleme HTTP požiadavku o všetky správy ktoré boli pridané na kanál. Následne správy spracuvávame jednu po druhej. Taktiež testujeme či neprišla odpoved "Too much requests" v tom prípade počkáme daný čas a pokúsime sa request opäť odoslať.Tento postup máme v cykle ak by chybová správa prišla viac krát.
+			
+			
+
+
+		\end{itemize}
+
+\section{Návod na použitie}
+
+	\subsection{Spustenie programu}
+
+    Program sa musí spustiť s parametrami, ktoré určujú jeho správanie počas behu. Paramatre sú na začiatku progamu vyhodnotené a pri nesprávnej kombinácii alebo neznámych parametroch bude program ukončený s nenulovým návratovým kódom\\
+
+	\textbf{Zoznam parametrov a ich význam:}
+	\begin{itemize}
+
+		\item \textit{-h/--help}\\[0.4em]
+			Parameter môže byť zadaný samostatne alebo s ľubovoľným iným parametrom ktorý popser podporuje. Tento parameter slúži na vypísanie krátkej pomocnej nápovedy na štandardný výstup a následne bude program ukončený.
+
+		\item \textit{-t/--token}\\[0.4em]
+			Parameter udáva aký autetizačný token bude pre Discord bota použitý. Pri nesprávnom tokene bude program ukončneý s návratovou hodnotou -1.
+
+		\item \textit{-v/--verbose}\\[0.4em]
+			Parameter zmení chovanie programu a to tým, že bude vypisovať správy ktoré sa odošlú na discord kanál aj na štandardný výstup.\\
+			Formát správy bude nasledový: echo <channel\_id>: <username> - <message>.
+			
+		\item \textit{-d/--debug}\\[0.4em]
+			Program bude Vypisovať ladiace informácie, ktoré zahrňujú odpovede na požiadavky poslané serveru, kritické požiadavky odoslané na server, výpis kritických premenných v programe. 
+			
+        \item \textit{-p/--period}\\[0.4em]
+            Program dokáže zmeniť periódu dotazovania sa na server/y z počiatočných 2 sec, povolené sú hodnoty int > 0 pri zadaní čísla mimo intervalu alebo nečíselnej hodnoty sa program ukončí s návratovou hodnotou -1 a hláškou \uv{Invalid argument}.
+            
+	\end{itemize}
+	
+	
+\section{Bonusové Rozšírenia}
+
+	\subsection{Podpora viac kanálov}
+    Program je schopný monitorovať viac kanálov, podľa toho koľko kanálov isa-bot sa na kanály vyskytuje.
+    \subsection{Podpora viac serverov}
+    Program je schopný monitorovať viac serverov, podľa toho na koľko serverov má bot povolený prístup.
+    \subsection{Podpora argumentu -d/--debug}
+        Podrobný popis v sekcii Zoznam parametrov a ich význam
+    \subsection{Podpora argumentu -p/--period}
+        Podrobný popis v sekcii Zoznam parametrov a ich význam
+\section{Záver}
+    \indent Počas implementácie som narazil na viac problémov, ktoré sa mi ale podarili vyriešiť, pre príklad:
+    \\ Vysporiadať sa a zistiť ako sa príjmajú správy pri atribúte chunked a bez neho, keďže som to na začiatku nevedel tak sa neukončila funkcia SSL\_read, ktorá ale už nemala čo čítať, keď celý obsah prišiel.
+    \\ Program využíva na získavanie údajov z odpovedí serveru regexy, čo mi nepríde ako najlepšia prax pri fakte že existuje mnoho parserov, ktoré sú odladené a splňujú požiadavky na použitie na daný účel
+    \\ \indent Projekt fungoval na všetkých testovacích vstupoch a teda si myslím, že projekt je plne funkčný a zodpovedá zadaniu.
+
+
+
+\section{Zdroje}
+\begin{thebibliography}{9}
+    \bibitem{SSL.com} 
+    SSL.com
+    \\\texttt{https://www.ssl.com/faqs/faq-what-is-ssl/}
+    
+    \bibitem{SSL.com} 
+    MDN web docs
+    \\\texttt{https://developer.mozilla.org/en-US/docs/Web/HTTP}
+    
+    \bibitem{SSL.com} 
+    Marty Kalin
+    \\\texttt{
+    https://opensource.com/article/19/6/cryptography-basics-openssl-part-1
+    }
+\end{thebibliography}
+\end{document} 
+
+
